@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.8.1"
-pydantic = "^1.10.9"
+pydantic = "^2.4.2"
 lxml = "^4.9.2"
 openai = "^0.28.1"
 presidio-analyzer = "^2.2.33"

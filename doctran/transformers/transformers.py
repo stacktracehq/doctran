@@ -1,15 +1,18 @@
-from enum import Enum
 import json
 import re
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel
+
 import tiktoken
 from doctran import Document, DoctranConfig, ExtractProperty, RecognizerEntity
+from pydantic import BaseModel
+
 
 class TooManyTokensException(Exception):
     def __init__(self, content_token_size: int, token_limit: int):
-        super().__init__(f"OpenAI document transformation failed. The document is {content_token_size} tokens long, which exceeds the token limit of {token_limit}.")
+        super().__init__(
+            f"OpenAI document transformation failed. The document is {content_token_size} tokens long, which exceeds the token limit of {token_limit}.")
+
 
 class OpenAIChatCompletionCall(BaseModel):
     deployment_id: Optional[str] = None
@@ -18,13 +21,15 @@ class OpenAIChatCompletionCall(BaseModel):
     temperature: int = 0
     max_tokens: Optional[int] = None
 
+
 class OpenAIFunctionCall(OpenAIChatCompletionCall):
     functions: List[Dict[str, Any]]
     function_call: Union[str, Dict[str, Any]]
 
+
 class DocumentTransformer(ABC):
     config: DoctranConfig
-    
+
     def __init__(self, config: DoctranConfig) -> None:
         self.config = config
 
@@ -32,9 +37,10 @@ class DocumentTransformer(ABC):
     def transform(self, document: Document) -> Document:
         pass
 
+
 class OpenAIDocumentTransformer(DocumentTransformer):
     function_parameters: Dict[str, Any]
-    
+
     def __init__(self, config: DoctranConfig) -> None:
         super().__init__(config)
         self.function_parameters = {
@@ -42,7 +48,7 @@ class OpenAIDocumentTransformer(DocumentTransformer):
             "properties": {},
             "required": [],
         }
-    
+
     def transform(self, document: Document) -> Document:
         encoding = tiktoken.encoding_for_model(self.config.openai_model)
         content_token_size = len(encoding.encode(document.transformed_content))
@@ -58,8 +64,8 @@ class OpenAIDocumentTransformer(DocumentTransformer):
         try:
             function_call = OpenAIFunctionCall(
                 deployment_id=self.config.openai_deployment_id,
-                model=self.config.openai_model, 
-                messages=[{"role": "user", "content": document.transformed_content}], 
+                model=self.config.openai_model,
+                messages=[{"role": "user", "content": document.transformed_content}],
                 functions=[{
                     "name": self.function_name,
                     "description": self.function_description,
@@ -86,6 +92,7 @@ class OpenAIDocumentTransformer(DocumentTransformer):
         except Exception as e:
             raise Exception(f"OpenAI function call failed: {e}")
 
+
 class DocumentExtractor(OpenAIDocumentTransformer):
     '''
     Use OpenAI function calling to extract structured data from the document.
@@ -110,6 +117,7 @@ class DocumentExtractor(OpenAIDocumentTransformer):
             if prop.required:
                 self.function_parameters["required"].append(prop.name)
 
+
 class DocumentSummarizer(OpenAIDocumentTransformer):
     '''
     Use OpenAI function calling to summarize the document to under a certain token limit.
@@ -130,6 +138,7 @@ class DocumentSummarizer(OpenAIDocumentTransformer):
         }
         self.function_parameters["required"].append("summary")
 
+
 class DocumentRedactor(DocumentTransformer):
     '''
     Use presidio to redact sensitive information from the document.
@@ -141,7 +150,8 @@ class DocumentRedactor(DocumentTransformer):
     spacy_model: str
     interactive: bool
 
-    def __init__(self, *, config: DoctranConfig, entities: List[Union[RecognizerEntity, str]] = None, spacy_model: str = "en_core_web_md", interactive: bool = True) -> None:
+    def __init__(self, *, config: DoctranConfig, entities: List[Union[RecognizerEntity, str]] = None,
+                 spacy_model: str = "en_core_web_md", interactive: bool = True) -> None:
         super().__init__(config)
         # TODO: support multiple NER models and sizes
         # Entities can be provided as either a string or enum, so convert to string in a all cases
@@ -155,7 +165,7 @@ class DocumentRedactor(DocumentTransformer):
             else:
                 raise Exception(f"Invalid entity type: {entity}")
         self.entities = entities
-    
+
     def transform(self, document: Document) -> Document:
         import spacy
         from presidio_analyzer import AnalyzerEngine
@@ -170,7 +180,8 @@ class DocumentRedactor(DocumentTransformer):
                 download(model="en_core_web_md")
             else:
                 while True:
-                    response = input(f"{self.spacy_model} model not found, but is required to run presidio-anonymizer. Download it now? (~40MB) (Y/n)")
+                    response = input(
+                        f"{self.spacy_model} model not found, but is required to run presidio-anonymizer. Download it now? (~40MB) (Y/n)")
                     if response.lower() in ["n", "no"]:
                         raise Exception(f"Cannot run presidio-anonymizer without {self.spacy_model} model.")
                     elif response.lower() in ["y", "yes", ""]:
@@ -181,7 +192,7 @@ class DocumentRedactor(DocumentTransformer):
                     else:
                         print("Invalid response.")
         text = document.transformed_content
-        nlp_engine_provider = NlpEngineProvider(nlp_configuration = {
+        nlp_engine_provider = NlpEngineProvider(nlp_configuration={
             "nlp_engine_name": "spacy",
             "models": [{"lang_code": "en",
                         "model_name": self.spacy_model
@@ -194,14 +205,15 @@ class DocumentRedactor(DocumentTransformer):
                                    entities=self.entities if self.entities else None,
                                    language='en')
         # TODO: Define customer operator to replace data types with numbered placeholders to differentiate between different PERSONs, EMAILs, etc
-        anonymized_data = anonymizer.anonymize(text=text, 
+        anonymized_data = anonymizer.anonymize(text=text,
                                                analyzer_results=results,
                                                operators={"DEFAULT": OperatorConfig("replace")})
-        
+
         # Extract just the anonymized text, discarding items metadata
         anonymized_text = anonymized_data.text
         document.transformed_content = anonymized_text
         return document
+
 
 class DocumentRefiner(OpenAIDocumentTransformer):
     '''
@@ -226,6 +238,7 @@ class DocumentRefiner(OpenAIDocumentTransformer):
         }
         self.function_parameters["required"].append("refined_document")
 
+
 class DocumentTranslator(OpenAIDocumentTransformer):
     '''
     Use OpenAI function calling to translate the document to another language.
@@ -245,6 +258,7 @@ class DocumentTranslator(OpenAIDocumentTransformer):
         }
         self.function_parameters["required"].append("translated_document")
 
+
 class DocumentInterrogator(OpenAIDocumentTransformer):
     '''
     Use OpenAI function calling to convert the document to a series of questions and answers.
@@ -252,6 +266,7 @@ class DocumentInterrogator(OpenAIDocumentTransformer):
     Returns:
         Document: the interrogated document represented as a Doctran Document
     '''
+
     def __init__(self, *, config: DoctranConfig) -> None:
         super().__init__(config)
         self.function_name = "interrogate"
@@ -276,6 +291,7 @@ class DocumentInterrogator(OpenAIDocumentTransformer):
         }
         self.function_parameters["required"].append("questions_and_answers")
 
+
 class DocumentTemplateProcessor(OpenAIDocumentTransformer):
     '''
     Use OpenAI function calling to replace a given template pattern in the document with the instructions provided within each placeholder.
@@ -285,6 +301,7 @@ class DocumentTemplateProcessor(OpenAIDocumentTransformer):
     Returns:
         Document: the interrogated document represented as a Doctran Document
     '''
+
     def __init__(self, *, config: DoctranConfig, template_regex: str) -> None:
         super().__init__(config)
         try:
@@ -329,7 +346,8 @@ class DocumentTemplateProcessor(OpenAIDocumentTransformer):
                 raise TooManyTokensException(content_token_size, self.config.openai_token_limit)
             document = self.executeOpenAICall(document)
             # Rather than relying on OpenAI to replace the placeholders, we do it ourselves to ensure non-templatized parts of the text are not modified
-            replacements = [replacement["replaced_value"] for replacement in sorted(document.extracted_properties["replacements"], key=lambda r: r["index"])]
+            replacements = [replacement["replaced_value"] for replacement in
+                            sorted(document.extracted_properties["replacements"], key=lambda r: r["index"])]
             document.transformed_content = re.sub(self.template_regex, lambda _: replacements.pop(0), text)
             return document
         except Exception as e:
